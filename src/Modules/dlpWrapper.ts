@@ -2,12 +2,15 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 
 export default class Wrapper {
+  // ======================== Check yt-dlp ========================
   path: string;
   YTDLP: ReturnType<typeof spawn> | null;
+  getOptions: ReturnType<typeof spawn> | null;
 
   constructor(path: string) {
     this.path = path || "yt-dlp.exe";
     this.YTDLP = null;
+    this.getOptions = null;
     this.checkVersion();
   }
   checkVersion() {
@@ -56,5 +59,29 @@ export default class Wrapper {
     } catch (error) {
       console.error("Error:", error);
     }
+  }
+  // =================================================================
+
+  // ======================== Download Videos ========================
+
+  // 1- get Video avalable options
+  getVideoOptions(url: string) {
+    this.getOptions = spawn(this.path, ["--list-formats", url]);
+    this.getOptions.stdout?.on("data", async (data) => {
+      console.log(data.toString().trim());
+    });
+    this.getOptions.stderr?.on("data", (data) => {
+      console.error(data.toString().trim());
+    });
+  }
+
+  downloadVideoById(url: string, id: string) {
+    this.getOptions = spawn(this.path, ["-f", id, url]);
+    this.getOptions.stdout?.on("data", async (data) => {
+      console.log(data.toString().trim());
+    });
+    this.getOptions.stderr?.on("data", (data) => {
+      console.error(data.toString().trim());
+    });
   }
 }
