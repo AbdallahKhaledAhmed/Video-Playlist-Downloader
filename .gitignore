@@ -1,5 +1,6 @@
 # DLP
 yt-dlp.exe
+ffmpeg.exe
 # Logs
 logs
 *.log
