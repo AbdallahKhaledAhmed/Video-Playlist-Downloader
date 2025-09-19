@@ -139,7 +139,11 @@ export default class Wrapper {
     });
   }
 
-  downloadVideoById(url: string, id: string, downloadDir: string = "./"): void {
+  downloadVideoById(
+    url: string,
+    id: string,
+    downloadDir: string = "./downloads"
+  ): void {
     const downloadArgs = [
       "-f",
       id,
@@ -206,19 +210,74 @@ export default class Wrapper {
 
   // ======================== Format Processing ========================
 
+  // Get video-only formats
+  getOnlyVideo(jsonData: any, codecFilter?: string): any[] {
+    return jsonData.formats.filter((format: any) => {
+      const hasCorrectCodec = codecFilter
+        ? format.vcodec && format.vcodec.startsWith(codecFilter)
+        : format.vcodec && format.vcodec !== "none";
+
+      return (
+        hasCorrectCodec &&
+        format.height && // Must have height (actual video)
+        (!format.acodec || format.acodec === "none") // Video only
+      );
+    });
+  }
+
+  // Get audio-only formats
+  getOnlyAudio(jsonData: any, codecFilter?: string): any[] {
+    return jsonData.formats.filter((format: any) => {
+      const hasCorrectCodec = codecFilter
+        ? format.acodec && format.acodec.startsWith(codecFilter)
+        : format.acodec && format.acodec !== "none";
+
+      return (
+        hasCorrectCodec && (!format.vcodec || format.vcodec === "none") // Audio only
+      );
+    });
+  }
+
+  // Get all formats (video-only + audio-only + combined)
+  getAllFormats(jsonData: any): any[] {
+    const videoFormats = this.getOnlyVideo(jsonData);
+    const audioFormats = this.getOnlyAudio(jsonData);
+    const combinedFormats = this.getCombinedFormats(jsonData);
+
+    // Add type identifiers
+    videoFormats.forEach((format) => (format.formatType = "video-only"));
+    audioFormats.forEach((format) => (format.formatType = "audio-only"));
+    combinedFormats.forEach((format) => (format.formatType = "combined"));
+
+    return [videoFormats, audioFormats, combinedFormats];
+  }
+
+  // Helper function to get combined formats
+  private getCombinedFormats(
+    jsonData: any,
+    videoCodecFilter?: string,
+    audioCodecFilter?: string
+  ): any[] {
+    return jsonData.formats.filter((format: any) => {
+      const hasCorrectVideoCodec = videoCodecFilter
+        ? format.vcodec && format.vcodec.startsWith(videoCodecFilter)
+        : format.vcodec && format.vcodec !== "none";
+
+      const hasCorrectAudioCodec = audioCodecFilter
+        ? format.acodec && format.acodec.startsWith(audioCodecFilter)
+        : format.acodec && format.acodec !== "none";
+
+      return (
+        hasCorrectVideoCodec && hasCorrectAudioCodec && format.height // Must have height (actual video)
+      );
+    });
+  }
+
   private getGeneralFormats(jsonData: any): any[] {
     const formats: any[] = [];
 
     // Get combined formats (already have both audio and video)
-    const combinedFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec !== "none" &&
-        format.acodec &&
-        format.acodec !== "none" &&
-        format.height // Must have height (actual video)
-      );
-    });
+    const combinedFormats = this.getCombinedFormats(jsonData);
 
     // Add combined formats to results (no need to merge)
     combinedFormats.forEach((format: any) => {
@@ -230,20 +289,12 @@ export default class Wrapper {
       });
     });
 
-    // Get video-only formats
-    const videoFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec !== "none" &&
-        format.height && // Must have height (actual video)
-        (!format.acodec || format.acodec === "none") // Video only
-      );
-    });
+    // Get video-only and audio-only formats
+    const videoFormats = this.getOnlyVideo(jsonData);
+    const audioFormats = this.getOnlyAudio(jsonData);
 
-    // Get audio-only format
-    const audioFormat = jsonData.formats.find((format: any) => {
-      return format.acodec && (!format.vcodec || format.vcodec === "none"); // Audio only
-    });
+    // Get best audio format for combination
+    const audioFormat = audioFormats[0]; // Take first available
 
     // Add video+audio combinations if we have separate streams
     if (audioFormat && videoFormats.length > 0) {
@@ -274,15 +325,11 @@ export default class Wrapper {
     const formats: any[] = [];
 
     // Get combined universal formats (H.264 + AAC)
-    const combinedUniversalFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec.startsWith("avc1") &&
-        format.acodec &&
-        format.acodec.startsWith("mp4a") &&
-        format.height // Must have height (actual video)
-      );
-    });
+    const combinedUniversalFormats = this.getCombinedFormats(
+      jsonData,
+      "avc1",
+      "mp4a"
+    );
 
     // Add combined formats to results
     combinedUniversalFormats.forEach((format: any) => {
@@ -295,24 +342,11 @@ export default class Wrapper {
     });
 
     // Get universal video-only formats (H.264/AVC1)
-    const universalVideoFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec.startsWith("avc1") &&
-        format.vcodec !== "none" &&
-        format.height && // Must have height (actual video)
-        (!format.acodec || format.acodec === "none") // Video only
-      );
-    });
+    const universalVideoFormats = this.getOnlyVideo(jsonData, "avc1");
 
     // Get universal audio format (AAC)
-    const universalAudioFormat = jsonData.formats.find((format: any) => {
-      return (
-        format.acodec &&
-        format.acodec.startsWith("mp4a") &&
-        (!format.vcodec || format.vcodec === "none") // Audio only
-      );
-    });
+    const universalAudioFormats = this.getOnlyAudio(jsonData, "mp4a");
+    const universalAudioFormat = universalAudioFormats[0]; // Take first available
 
     // Add video+audio combinations if we have separate streams
     if (universalAudioFormat && universalVideoFormats.length > 0) {
@@ -344,16 +378,9 @@ export default class Wrapper {
     const formats: any[] = [];
 
     // Get all combined formats (already have both audio and video)
-    const combinedFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec !== "none" &&
-        format.acodec &&
-        format.acodec !== "none" &&
-        format.height && // Must have height (actual video)
-        format.filesize // Must have filesize for sorting
-      );
-    });
+    const combinedFormats = this.getCombinedFormats(jsonData).filter(
+      (format) => format.filesize
+    );
 
     // Add combined formats
     combinedFormats.forEach((format: any) => {
@@ -365,27 +392,13 @@ export default class Wrapper {
       });
     });
 
-    // Get all video-only formats
-    const videoFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.vcodec &&
-        format.vcodec !== "none" &&
-        format.height && // Must have height (actual video)
-        (!format.acodec || format.acodec === "none") && // Video only
-        format.filesize // Must have filesize for sorting
-      );
-    });
+    // Get all video-only formats (with filesize for sorting)
+    const videoFormats = this.getOnlyVideo(jsonData).filter(
+      (format) => format.filesize
+    );
 
-    // Get all audio-only formats
-    const audioFormats = jsonData.formats.filter((format: any) => {
-      return (
-        format.acodec &&
-        format.acodec !== "none" &&
-        (!format.vcodec || format.vcodec === "none") // Audio only
-      );
-    });
-
-    // Get the smallest audio format
+    // Get all audio-only formats and find the smallest one
+    const audioFormats = this.getOnlyAudio(jsonData);
     const smallestAudioFormat = audioFormats.sort(
       (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
     )[0];

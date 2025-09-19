@@ -70,9 +70,9 @@ function displayOptions(
       : "Unknown codec";
     const fps = option.fps ? `|${option.fps}fps` : "";
 
-    output += `${index + 1}. 📹 ${resolution} | ${
-      option.ext
-    } | 💾 ${fileSize} | ${formatType} | 🔧 Video:${vcodec}${fps}/Audio:${acodec}\n`;
+    output += `${
+      index + 1
+    }. 📹 ${resolution} | 💾 ${fileSize} | ${formatType} | 🔧 Video:${vcodec}${fps}/Audio:${acodec}\n`;
   });
 
   output += `\n💡 Enter the number of your preferred format (1-${options.length}): `;
