@@ -59,20 +59,20 @@ function displayOptions(
         ? `${(totalSize / 1024 / 1024).toFixed(2)} MB`
         : "Unknown size";
 
-    // Show breakdown if we have both video and audio sizes
-    let sizeBreakdown = "";
-    // if (option.filesize && option.audioFilesize && option.combinedFilesize) {
-    //   const videoMB = (option.filesize / 1024 / 1024).toFixed(2);
-    //   const audioMB = (option.audioFilesize / 1024 / 1024).toFixed(2);
-    //   sizeBreakdown = ` (${videoMB}MB video + ${audioMB}MB audio)`;
-    // }
+    // Show if it's combined or needs merging
+    const formatType = option.isCombined ? "📱 Combined" : "🔗 Needs merge";
 
-    const codec = option.vcodec ? option.vcodec.split(".")[0] : "Unknown codec";
-    const fps = option.fps ? ` ${option.fps}fps` : "";
+    const vcodec = option.vcodec
+      ? option.vcodec.split(".")[0]
+      : "Unknown codec";
+    const acodec = option.acodec
+      ? option.acodec.split(".")[0]
+      : "Unknown codec";
+    const fps = option.fps ? `|${option.fps}fps` : "";
 
-    output += `${
-      index + 1
-    }. 📹 ${resolution} | 💾 ${fileSize}${sizeBreakdown} | 🔧 ${codec}${fps}\n`;
+    output += `${index + 1}. 📹 ${resolution} | ${
+      option.ext
+    } | 💾 ${fileSize} | ${formatType} | 🔧 Video:${vcodec}${fps}/Audio:${acodec}\n`;
   });
 
   output += `\n💡 Enter the number of your preferred format (1-${options.length}): `;
@@ -80,53 +80,103 @@ function displayOptions(
   console.log(output); // Use console.log instead of logUpdate for this
 }
 
-async function main() {
+// Function to wait for download completion
+function waitForDownloadCompletion(
+  dlp: Wrapper,
+  url: string,
+  formatId: string,
+  downloadDir: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    // Create a simple wrapper that monitors the download process
+    let downloadCompleted = false;
+
+    // Start the download normally
+    dlp.downloadVideoById(url, formatId, downloadDir);
+
+    // Since we can't easily hook into the existing download method,
+    // we'll use a simple timeout-based check and assume it completes
+    // This is a workaround - ideally the Wrapper class would have events
+
+    // Monitor console output by intercepting console.log temporarily
+    const originalConsoleLog = console.log;
+
+    console.log = function (...args: any[]) {
+      const message = args.join(" ");
+
+      // Check for completion messages
+      if (
+        message.includes("Download completed successfully!") ||
+        message.includes("✅ Download completed successfully!")
+      ) {
+        downloadCompleted = true;
+        console.log = originalConsoleLog; // Restore original
+        originalConsoleLog(...args); // Log the success message
+        setTimeout(() => resolve(true), 100); // Small delay to ensure message is shown
+        return;
+      }
+
+      if (
+        message.includes("Download failed") ||
+        message.includes("❌ Download failed")
+      ) {
+        downloadCompleted = true;
+        console.log = originalConsoleLog; // Restore original
+        originalConsoleLog(...args); // Log the error message
+        setTimeout(() => resolve(false), 100);
+        return;
+      }
+
+      // Call original console.log for other messages
+      originalConsoleLog(...args);
+    };
+
+    // Fallback timeout in case we miss the completion message
+    setTimeout(() => {
+      if (!downloadCompleted) {
+        console.log = originalConsoleLog; // Restore original
+        console.log("⏰ Download timeout reached. Continuing...");
+        resolve(false);
+      }
+    }, 300000); // 5 minute timeout
+  });
+}
+
+function createProgressBar(percent: number, length: number = 30): string {
+  const filled = Math.round((percent / 100) * length);
+  const empty = length - filled;
+  return "█".repeat(filled) + "░".repeat(empty);
+}
+
+async function downloadVideo(): Promise<boolean> {
   try {
-    // Clear console and show loading
-    console.clear();
-    logUpdate("🚀 Starting Video Downloader...\n");
-
-    // Get download directory from user
-    const downloadDirInput = null;
-    //  await askQuestion(
-    //   '\n📁 Enter download directory (press Enter for default "./downloads"): '
-    // );
-    const downloadDir = downloadDirInput || "./downloads";
-
-    // Ensure the directory exists
-    if (!ensureDirectoryExists(downloadDir)) {
-      console.log("❌ Failed to create download directory. Exiting...");
-      rl.close();
-      return;
-    }
-
     // Get URL from user
-    const url = await askQuestion("\n🔗 Enter YouTube URL: ");
+    const url = await askQuestion("\n🔗 Enter Video URL (or 'quit' to exit): ");
 
-    if (!url) {
-      console.log("❌ No URL provided. Exiting...");
-      rl.close();
-      return;
+    if (!url || url.toLowerCase() === "quit") {
+      return false; // Signal to exit
     }
 
     // Ask user for preference
     logUpdate.clear();
-    console.log("\n📊 Format Preference:");
-    console.log("1. Universal (H.264 - works on all devices)");
-    console.log("2. Smallest file size (mixed codecs)");
+    let preference: "universal" | "smallest" = "smallest";
+    if (url.includes("youtube.com") || url.includes("youtu.be")) {
+      console.log("\n📊 Format Preference:");
+      console.log("1. Universal (H.264 - works on all devices)");
+      console.log("2. Smallest file size (mixed codecs)");
 
-    const preferenceChoice = await askQuestion(
-      "\nEnter your preference (1 or 2): "
-    );
+      const preferenceChoice = await askQuestion(
+        "\nEnter your preference (1 or 2, or press Enter for smallest): "
+      );
 
-    let preference: "universal" | "smallest";
-    if (preferenceChoice === "1") {
-      preference = "universal";
-    } else if (preferenceChoice === "2") {
-      preference = "smallest";
-    } else {
-      console.log("❌ Invalid choice. Using universal format.");
-      preference = "universal";
+      if (preferenceChoice === "1") {
+        preference = "universal";
+      } else if (preferenceChoice === "2" || preferenceChoice === "") {
+        preference = "smallest";
+      } else {
+        console.log("❌ Invalid choice. Using smallest file size.");
+        preference = "smallest";
+      }
     }
 
     // Show loading while fetching options
@@ -146,8 +196,7 @@ async function main() {
     if (!data || data.length === 0) {
       logUpdate.clear();
       console.log("❌ No video formats found for this URL.");
-      rl.close();
-      return;
+      return true; // Continue loop
     }
 
     // Display options
@@ -164,12 +213,19 @@ async function main() {
       selectedIndex >= data.length
     ) {
       logUpdate.clear();
-      console.log("❌ Invalid selection. Please run the program again.");
-      rl.close();
-      return;
+      console.log("❌ Invalid selection. Please try again.");
+      return true; // Continue loop
     }
 
     const selectedFormat = data[selectedIndex];
+    const downloadDir = "./downloads";
+
+    // Ensure directory exists
+    if (!ensureDirectoryExists(downloadDir)) {
+      console.log(
+        "❌ Failed to create download directory. Continuing with current directory..."
+      );
+    }
 
     // Clear and show download info
     logUpdate.clear();
@@ -179,12 +235,55 @@ async function main() {
     console.log(`📁 Download directory: ${path.resolve(downloadDir)}`);
     console.log(`📥 Starting download...`);
 
-    // Start download with specified directory
-    dlp.downloadVideoById(url, selectedFormat.combinedFormat, downloadDir);
+    // Wait for download to complete
+    const success = await waitForDownloadCompletion(
+      dlp,
+      url,
+      selectedFormat.combinedFormat,
+      downloadDir
+    );
+
+    if (success) {
+      console.log("\n🎉 Ready for next download!");
+    } else {
+      console.log("\n⚠️ Download had issues, but you can try another video.");
+    }
+
+    return true; // Continue loop
   } catch (error) {
     logUpdate.clear();
     console.error("❌ Error:", error);
+    console.log("⚠️ You can try again with a different URL.");
+    return true; // Continue loop even on error
+  }
+}
+
+async function main() {
+  try {
+    console.clear();
+    console.log("🚀 Video Downloader Started!");
+    console.log("📝 Type 'quit' at any time to exit");
+
+    // Check version once at startup
+    console.log("🔄 Checking yt-dlp version...");
+    console.log(await dlp.checkVersion());
+    console.log("");
+
+    // Main download loop
+    while (true) {
+      const shouldContinue = await downloadVideo();
+      if (!shouldContinue) {
+        break;
+      }
+
+      // Add a small separator between downloads
+      console.log("\n" + "─".repeat(50));
+    }
+  } catch (error) {
+    logUpdate.clear();
+    console.error("❌ Fatal Error:", error);
   } finally {
+    console.log("\n👋 Thanks for using Video Downloader!");
     rl.close();
   }
 }
@@ -192,7 +291,7 @@ async function main() {
 // Handle process termination
 process.on("SIGINT", () => {
   logUpdate.clear();
-  console.log("\n👋 Download cancelled by user.");
+  console.log("\n👋 Download cancelled by user. Goodbye!");
   rl.close();
   process.exit(0);
 });

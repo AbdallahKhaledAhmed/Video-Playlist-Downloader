@@ -19,35 +19,50 @@ export default class Wrapper {
 
   // ======================== Version Management ========================
 
-  checkVersion() {
-    this.YTDLP = spawn(this.path, ["--version"]);
+  async checkVersion() {
+    return new Promise(async (res, rej) => {
+      this.YTDLP = spawn(this.path, ["--version"]);
 
-    this.YTDLP.on("error", async (err) => {
-      console.error("Failed to find yt-dlp!:", err.message);
-      console.log("Downloading latest version of yt-dlp...");
-      const latestVersion = await this.getLatestRelease();
-      if (latestVersion) {
-        this.downloadLatestRelease(latestVersion);
-      }
-    });
-
-    this.YTDLP.stdout?.on("data", async (data) => {
-      const current: string = data.toString().trim();
-      const latest: string | null = await this.getLatestRelease();
-
-      if (latest === current) {
-        console.log("yt-dlp is up to date ✅");
-      }
-
-      if (latest !== current && latest !== null) {
-        console.log("yt-dlp out dated");
+      this.YTDLP.on("error", async (err) => {
+        console.error("Failed to find yt-dlp!:", err.message);
         console.log("Downloading latest version of yt-dlp...");
-        spawn(this.path, ["-U"]);
-      }
-    });
+        const latestVersion = await this.getLatestRelease();
+        if (latestVersion) {
+          try {
+            await this.downloadLatestRelease(latestVersion);
+            res("yt-dlp is Downloaded successfully! ✅");
+          } catch (err) {
+            rej(err);
+          }
+        }
+      });
+      this.YTDLP.stdout?.on("data", async (data) => {
+        const current: string = data.toString().trim();
+        const latest: string | null = await this.getLatestRelease();
 
-    this.YTDLP.stderr?.on("data", (data) => {
-      console.error(data.toString().trim());
+        if (latest === current) {
+          res("yt-dlp is up to date ✅");
+        }
+
+        if (latest !== current && latest !== null) {
+          console.log("yt-dlp out dated");
+          console.log("Downloading latest version of yt-dlp...");
+          const updater = spawn(this.path, ["-U"]);
+          updater.on("error", (err) => {
+            rej(err.message);
+          });
+          updater.stderr.on("data", (data) => {
+            rej(data);
+          });
+          updater.on("close", () => {
+            res("yt-dlp is Updated successfully! ✅");
+          });
+        }
+      });
+
+      this.YTDLP.stderr?.on("data", (data) => {
+        console.error(data.toString().trim());
+      });
     });
   }
 
@@ -105,15 +120,17 @@ export default class Wrapper {
 
       this.getOptions.on("close", () => {
         try {
-          const jsonData = JSON.parse(allOptions);
+          const jsonData: any[] = JSON.parse(allOptions);
           let processedFormats;
-
-          if (preference === "universal") {
-            processedFormats = this.getUniversalFormats(jsonData);
+          if (url.includes("youtube.com") || url.includes("youtu.be")) {
+            if (preference === "universal") {
+              processedFormats = this.getUniversalFormats(jsonData);
+            } else {
+              processedFormats = this.getSmallestFormats(jsonData);
+            }
           } else {
-            processedFormats = this.getSmallestFormats(jsonData);
+            processedFormats = this.getGeneralFormats(jsonData);
           }
-
           res(processedFormats || []);
         } catch (error) {
           rej(`Failed to parse JSON: ${error}`);
@@ -189,50 +206,166 @@ export default class Wrapper {
 
   // ======================== Format Processing ========================
 
+  private getGeneralFormats(jsonData: any): any[] {
+    const formats: any[] = [];
+
+    // Get combined formats (already have both audio and video)
+    const combinedFormats = jsonData.formats.filter((format: any) => {
+      return (
+        format.vcodec &&
+        format.vcodec !== "none" &&
+        format.acodec &&
+        format.acodec !== "none" &&
+        format.height // Must have height (actual video)
+      );
+    });
+
+    // Add combined formats to results (no need to merge)
+    combinedFormats.forEach((format: any) => {
+      formats.push({
+        ...format,
+        isCombined: true,
+        combinedFormat: format.format_id, // Just use the format ID as-is
+        combinedFilesize: format.filesize || 0,
+      });
+    });
+
+    // Get video-only formats
+    const videoFormats = jsonData.formats.filter((format: any) => {
+      return (
+        format.vcodec &&
+        format.vcodec !== "none" &&
+        format.height && // Must have height (actual video)
+        (!format.acodec || format.acodec === "none") // Video only
+      );
+    });
+
+    // Get audio-only format
+    const audioFormat = jsonData.formats.find((format: any) => {
+      return format.acodec && (!format.vcodec || format.vcodec === "none"); // Audio only
+    });
+
+    // Add video+audio combinations if we have separate streams
+    if (audioFormat && videoFormats.length > 0) {
+      videoFormats.forEach((video: any) => {
+        formats.push({
+          ...video,
+          acodec: audioFormat.acodec,
+          audioFormatId: audioFormat.format_id || "140",
+          audioFilesize: audioFormat.filesize || 0,
+          isCombined: false,
+          combinedFilesize: (video.filesize || 0) + (audioFormat.filesize || 0),
+          combinedFormat: `${video.format_id}+${
+            audioFormat.format_id || "140"
+          }`,
+        });
+      });
+    }
+
+    // Sort by file size (smallest first)
+    formats.sort(
+      (a: any, b: any) => (a.combinedFilesize || 0) - (b.combinedFilesize || 0)
+    );
+
+    return formats;
+  }
+
   private getUniversalFormats(jsonData: any): any[] {
-    // Get ALL universal video formats (H.264/AVC1) - video only
+    const formats: any[] = [];
+
+    // Get combined universal formats (H.264 + AAC)
+    const combinedUniversalFormats = jsonData.formats.filter((format: any) => {
+      return (
+        format.vcodec &&
+        format.vcodec.startsWith("avc1") &&
+        format.acodec &&
+        format.acodec.startsWith("mp4a") &&
+        format.height // Must have height (actual video)
+      );
+    });
+
+    // Add combined formats to results
+    combinedUniversalFormats.forEach((format: any) => {
+      formats.push({
+        ...format,
+        isCombined: true,
+        combinedFormat: format.format_id,
+        combinedFilesize: format.filesize || 0,
+      });
+    });
+
+    // Get universal video-only formats (H.264/AVC1)
     const universalVideoFormats = jsonData.formats.filter((format: any) => {
       return (
         format.vcodec &&
         format.vcodec.startsWith("avc1") &&
         format.vcodec !== "none" &&
         format.height && // Must have height (actual video)
-        (!format.acodec || format.acodec === "none")
-      ); // Video only
+        (!format.acodec || format.acodec === "none") // Video only
+      );
     });
 
-    // Get universal audio format (AAC) - should be 140
+    // Get universal audio format (AAC)
     const universalAudioFormat = jsonData.formats.find((format: any) => {
       return (
         format.acodec &&
         format.acodec.startsWith("mp4a") &&
-        (!format.vcodec || format.vcodec === "none")
-      ); // Audio only
+        (!format.vcodec || format.vcodec === "none") // Audio only
+      );
     });
 
+    // Add video+audio combinations if we have separate streams
+    if (universalAudioFormat && universalVideoFormats.length > 0) {
+      universalVideoFormats.forEach((video: any) => {
+        formats.push({
+          ...video,
+          acodec: universalAudioFormat.acodec,
+          audioFormatId: universalAudioFormat.format_id || "140",
+          audioFilesize: universalAudioFormat.filesize || 0,
+          isCombined: false,
+          combinedFilesize:
+            (video.filesize || 0) + (universalAudioFormat.filesize || 0),
+          combinedFormat: `${video.format_id}+${
+            universalAudioFormat.format_id || "140"
+          }`,
+        });
+      });
+    }
+
     // Sort by file size (smallest first)
-    universalVideoFormats.sort(
-      (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
-    );
-    universalVideoFormats.sort(
-      (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
+    formats.sort(
+      (a: any, b: any) => (a.combinedFilesize || 0) - (b.combinedFilesize || 0)
     );
 
-    // Add audio format ID and calculate combined file size
-    return universalVideoFormats.map((video: any) => ({
-      ...video,
-      audioFormatId: universalAudioFormat?.format_id || "140",
-      audioFilesize: universalAudioFormat?.filesize || 0,
-      combinedFilesize:
-        (video.filesize || 0) + (universalAudioFormat?.filesize || 0),
-      combinedFormat: `${video.format_id}+${
-        universalAudioFormat?.format_id || "140"
-      }`,
-    }));
+    return formats;
   }
 
   private getSmallestFormats(jsonData: any): any[] {
-    // Get all video formats - video only
+    const formats: any[] = [];
+
+    // Get all combined formats (already have both audio and video)
+    const combinedFormats = jsonData.formats.filter((format: any) => {
+      return (
+        format.vcodec &&
+        format.vcodec !== "none" &&
+        format.acodec &&
+        format.acodec !== "none" &&
+        format.height && // Must have height (actual video)
+        format.filesize // Must have filesize for sorting
+      );
+    });
+
+    // Add combined formats
+    combinedFormats.forEach((format: any) => {
+      formats.push({
+        ...format,
+        isCombined: true,
+        combinedFormat: format.format_id,
+        combinedFilesize: format.filesize || 0,
+      });
+    });
+
+    // Get all video-only formats
     const videoFormats = jsonData.formats.filter((format: any) => {
       return (
         format.vcodec &&
@@ -243,7 +376,7 @@ export default class Wrapper {
       );
     });
 
-    // Get all audio formats - audio only
+    // Get all audio-only formats
     const audioFormats = jsonData.formats.filter((format: any) => {
       return (
         format.acodec &&
@@ -252,27 +385,34 @@ export default class Wrapper {
       );
     });
 
-    // Sort by file size (smallest first)
-    videoFormats.sort(
-      (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
-    );
-    audioFormats.sort(
-      (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
-    );
-
     // Get the smallest audio format
-    const smallestAudioFormat = audioFormats[0];
+    const smallestAudioFormat = audioFormats.sort(
+      (a: any, b: any) => (a.filesize || 0) - (b.filesize || 0)
+    )[0];
 
-    // Add audio format ID and calculate combined file size
-    return videoFormats.map((video: any) => ({
-      ...video,
-      audioFormatId: smallestAudioFormat?.format_id || "140",
-      audioFilesize: smallestAudioFormat?.filesize || 0,
-      combinedFilesize:
-        (video.filesize || 0) + (smallestAudioFormat?.filesize || 0),
-      combinedFormat: `${video.format_id}+${
-        smallestAudioFormat?.format_id || "140"
-      }`,
-    }));
+    // Add video+audio combinations if we have separate streams
+    if (smallestAudioFormat && videoFormats.length > 0) {
+      videoFormats.forEach((video: any) => {
+        formats.push({
+          ...video,
+          acodec: smallestAudioFormat.acodec,
+          audioFormatId: smallestAudioFormat.format_id || "140",
+          audioFilesize: smallestAudioFormat.filesize || 0,
+          isCombined: false,
+          combinedFilesize:
+            (video.filesize || 0) + (smallestAudioFormat.filesize || 0),
+          combinedFormat: `${video.format_id}+${
+            smallestAudioFormat.format_id || "140"
+          }`,
+        });
+      });
+    }
+
+    // Sort by file size (smallest first)
+    formats.sort(
+      (a: any, b: any) => (a.combinedFilesize || 0) - (b.combinedFilesize || 0)
+    );
+
+    return formats;
   }
 }
