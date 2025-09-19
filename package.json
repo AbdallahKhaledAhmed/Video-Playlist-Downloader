@@ -11,5 +11,8 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^24.5.1"
+  },
+  "dependencies": {
+    "log-update": "^7.0.0"
   }
 }
