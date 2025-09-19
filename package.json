@@ -1,18 +1,40 @@
 {
   "name": "video-playlist-downloader",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "npm run build && node dist/main.js",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist",
+    "rebuild": "npm run clean && npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "video-downloader",
+    "yt-dlp",
+    "cli",
+    "typescript",
+    "youtube",
+    "downloader"
+  ],
+  "author": "AbdallahKhaledAhmed",
+  "license": "MIT",
+  "description": "A powerful TypeScript-based video downloader with interactive CLI interface",
   "devDependencies": {
     "@types/node": "^24.5.1"
   },
   "dependencies": {
     "log-update": "^7.0.0"
-  }
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader/issues"
+  },
+  "homepage": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader#readme"
 }

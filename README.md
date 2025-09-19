@@ -48,7 +48,7 @@ YouTube, Vimeo, Facebook, Instagram, Twitter, Twitch, SoundCloud, TikTok, Dailym
 
 4. **Run the downloader**
    ```bash
-   node dist/src/main.js
+   node dist/main.js
    ```
 
 ## 🎮 Usage
