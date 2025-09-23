@@ -15,12 +15,23 @@ declare global {
   }
 }
 
-// Simple progress tracker without external dependencies
-class SimpleProgress {
+// Enhanced progress tracker with better reliability
+class ProgressBar {
   private lastLineLength = 0;
+  private isActive = false;
+  private lastUpdate = 0;
+  private updateInterval = 200; // Update every 200ms
 
   update(message: string) {
-    // Clear the current line by overwriting with spaces
+    const now = Date.now();
+    
+    // Throttle updates to prevent spam
+    if (now - this.lastUpdate < this.updateInterval) {
+      return;
+    }
+    this.lastUpdate = now;
+
+    // Clear the current line completely
     if (this.lastLineLength > 0) {
       process.stdout.write("\r" + " ".repeat(this.lastLineLength) + "\r");
     }
@@ -28,6 +39,7 @@ class SimpleProgress {
     // Write the new message
     process.stdout.write(message);
     this.lastLineLength = message.length;
+    this.isActive = true;
   }
 
   clear() {
@@ -35,13 +47,30 @@ class SimpleProgress {
       process.stdout.write("\r" + " ".repeat(this.lastLineLength) + "\r");
       this.lastLineLength = 0;
     }
+    this.isActive = false;
   }
 
   done() {
-    if (this.lastLineLength > 0) {
+    if (this.isActive) {
       process.stdout.write("\n");
       this.lastLineLength = 0;
+      this.isActive = false;
     }
+  }
+
+  isUpdating(): boolean {
+    return this.isActive;
+  }
+
+  // Force update regardless of throttle
+  forceUpdate(message: string) {
+    // Clear the current line completely
+    if (this.lastLineLength > 0) {
+      process.stdout.write("\r" + " ".repeat(this.lastLineLength) + "\r");
+    }
+    process.stdout.write(message);
+    this.lastLineLength = message.length;
+    this.isActive = true;
   }
 }
 
@@ -97,7 +126,7 @@ class Spinner {
   }
 }
 
-const progress = new SimpleProgress();
+const progress = new ProgressBar();
 
 // Handle executable vs development environment
 function getExecutablePath(): string {
@@ -376,12 +405,10 @@ function displayOptions(
   console.log(output);
 }
 
-function createProgressBar(percentage: number, width: number = 30): string {
+function createProgressBar(percentage: number, width: number = 25): string {
   const filled = Math.round((percentage / 100) * width);
   const empty = width - filled;
-  return `[${"|".repeat(filled)}${".".repeat(empty)}] ${percentage.toFixed(
-    1
-  )}%`;
+  return `[${"█".repeat(filled)}${"░".repeat(empty)}] ${percentage.toFixed(1)}%`;
 }
 
 function waitForDownloadCompletion(
@@ -394,6 +421,11 @@ function waitForDownloadCompletion(
   return new Promise((resolve) => {
     let downloadCompleted = false;
     let currentFilename = videoTitle || "Unknown";
+    let lastPercentage = -1;
+    let startTime = Date.now();
+
+    // Show initial progress
+    progress.forceUpdate(`[DOWNLOAD] ${currentFilename} [░░░░░░░░░░░░░░░░░░░░░░░░░] 0.0% | Starting...`);
 
     dlp
       .downloadVideosByFormatId(
@@ -404,26 +436,45 @@ function waitForDownloadCompletion(
         (progressInfo) => {
           if (progressInfo.type === "progress") {
             if (progressInfo.filename) {
-              currentFilename = path.basename(progressInfo.filename);
+              // Extract just the filename without extension for display
+              const fullPath = progressInfo.filename;
+              const basename = path.basename(fullPath);
+              // Remove file extension for cleaner display
+              const nameWithoutExt = basename.replace(/\.[^/.]+$/, "");
+              currentFilename = nameWithoutExt;
             }
 
             if (progressInfo.percentage !== undefined) {
-              const progressBar = createProgressBar(progressInfo.percentage);
-              const speed = progressInfo.speed
-                ? ` | ${progressInfo.speed}`
-                : "";
-              const eta = progressInfo.eta ? ` | ETA: ${progressInfo.eta}` : "";
-              const size = progressInfo.size ? ` | ${progressInfo.size}` : "";
+              const currentPercentage = Math.floor(progressInfo.percentage);
+              
+              // Update progress with proper throttling
+              if (currentPercentage !== lastPercentage || progressInfo.percentage >= 100) {
+                lastPercentage = currentPercentage;
+                
+                const progressBar = createProgressBar(progressInfo.percentage);
+                const speed = progressInfo.speed ? ` | ${progressInfo.speed}` : "";
+                const eta = progressInfo.eta ? ` | ETA: ${progressInfo.eta}` : "";
+                const size = progressInfo.size ? ` | ${progressInfo.size}` : "";
 
-              progress.update(
-                `[DOWNLOAD] ${currentFilename} ${progressBar}${speed}${eta}${size}`
-              );
+                // Truncate filename if too long
+                const displayName = currentFilename.length > 35 
+                  ? currentFilename.substring(0, 32) + "..." 
+                  : currentFilename;
+
+                // Use regular update with throttling
+                progress.update(
+                  `[DOWNLOAD] ${displayName} ${progressBar}${speed}${eta}${size}`
+                );
+              }
             }
           } else if (progressInfo.type === "complete") {
             downloadCompleted = true;
-            progress.done();
-            console.log(`[OK] Download completed: ${currentFilename}`);
-            setTimeout(() => resolve(true), 100);
+            progress.forceUpdate(`[DOWNLOAD] ${currentFilename} [█████████████████████████] 100.0% | Complete!`);
+            setTimeout(() => {
+              progress.done();
+              console.log(`[OK] Download completed: ${currentFilename}`);
+              resolve(true);
+            }, 500);
           } else if (progressInfo.type === "error") {
             downloadCompleted = true;
             progress.done();
@@ -435,9 +486,12 @@ function waitForDownloadCompletion(
       .then(() => {
         if (!downloadCompleted) {
           downloadCompleted = true;
-          progress.done();
-          console.log(`[OK] Download completed: ${currentFilename}`);
-          resolve(true);
+          progress.forceUpdate(`[DOWNLOAD] ${currentFilename} [█████████████████████████] 100.0% | Complete!`);
+          setTimeout(() => {
+            progress.done();
+            console.log(`[OK] Download completed: ${currentFilename}`);
+            resolve(true);
+          }, 500);
         }
       })
       .catch((error) => {
@@ -449,6 +503,7 @@ function waitForDownloadCompletion(
         }
       });
 
+    // Fallback timeout
     setTimeout(() => {
       if (!downloadCompleted) {
         downloadCompleted = true;
@@ -541,11 +596,21 @@ async function processSingleVideo(url: string): Promise<boolean> {
     console.log(`[DIR] Download directory: ${path.resolve(downloadDir)}`);
     console.log(`[START] Starting download...`);
 
+    // Get video title before starting download
+    let videoTitle: string | undefined;
+    try {
+      const videoInfo = await dlp.getVideoInfo(url);
+      videoTitle = videoInfo.title;
+    } catch (error) {
+      console.log("[WARNING] Could not get video title, using fallback");
+    }
+
     const success = await waitForDownloadCompletion(
       dlp,
       url,
       selectedFormat.combinedFormat,
-      downloadDir
+      downloadDir,
+      videoTitle
     );
 
     if (success) {

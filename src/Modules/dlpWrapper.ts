@@ -126,6 +126,46 @@ export default class Wrapper {
 
   // ======================== Video Operations ========================
 
+  getVideoInfo(url: string): Promise<{ title: string; duration?: number; uploader?: string }> {
+    return new Promise((resolve, reject) => {
+      const getInfo = spawn(this.path, ["--dump-single-json", url]);
+
+      let videoInfo = "";
+
+      getInfo.stdout?.on("data", (data) => {
+        videoInfo += data.toString();
+      });
+
+      getInfo.stderr?.on("data", (data) => {
+        const errorText = data.toString();
+        if (!errorText.includes("ffmpeg") && !errorText.includes("WARNING")) {
+          reject(new Error(errorText));
+        }
+      });
+
+      getInfo.on("error", (error) => {
+        reject(new Error(`Failed to get video info: ${error.message}`));
+      });
+
+      getInfo.on("close", (code) => {
+        if (code === 0) {
+          try {
+            const jsonData = JSON.parse(videoInfo);
+            resolve({
+              title: jsonData.title || "Unknown Title",
+              duration: jsonData.duration,
+              uploader: jsonData.uploader,
+            });
+          } catch (parseError) {
+            reject(new Error(`Failed to parse video info: ${parseError}`));
+          }
+        } else {
+          reject(new Error(`Process exited with code: ${code}`));
+        }
+      });
+    });
+  }
+
   getVideoOptions(url: string): Promise<YtDlpFormats> {
     return new Promise((res, rej) => {
       this.getOptions = spawn(this.path, ["--dump-single-json", url]);
@@ -195,12 +235,23 @@ export default class Wrapper {
       });
 
       this.download.stderr?.on("data", (data) => {
-        const errorText = data.toString();
-        if (!errorText.includes("WARNING")) {
-          if (onProgress) {
-            onProgress({ type: "error", message: errorText });
+        const output = data.toString();
+        
+        // Try to parse as progress first
+        if (onProgress) {
+          const progress = this.parseDownloadProgress(output);
+          if (progress) {
+            onProgress(progress);
+            return;
           }
-          reject(new Error(errorText));
+        }
+        
+        // If not progress, handle as error
+        if (!output.includes("WARNING") && !output.includes("ffmpeg")) {
+          if (onProgress) {
+            onProgress({ type: "error", message: output });
+          }
+          reject(new Error(output));
         }
       });
 
@@ -222,7 +273,8 @@ export default class Wrapper {
   }
 
   private parseDownloadProgress(output: string): DownloadProgress | null {
-    // Parse yt-dlp progress output
+
+    // Parse yt-dlp progress output - improved patterns
     // Example: "[download]  45.2% of 123.45MB at 1.23MB/s ETA 00:45"
     const progressMatch = output.match(
       /\[download\]\s+(\d+\.?\d*)%\s+of\s+([\d.]+\w+)(?:\s+at\s+([\d.]+\w+\/s))?(?:\s+ETA\s+([\d:]+))?/
@@ -238,12 +290,61 @@ export default class Wrapper {
       };
     }
 
+    // Parse progress with filename and progress bar
+    // Example: "[download] Video Title.f278.webm [||||||||||||||||||||||||||||||] 100.0% | 754.38KiB/s | ETA: 00:0"
+    const progressWithFilenameMatch = output.match(
+      /\[download\]\s+(.+?)\s+\[[|\-\.]+\]\s+(\d+\.?\d*)%\s+(?:\|\s+([\d.]+\w+\/s))?(?:\s+\|\s+ETA:\s+([\d:]+))?/
+    );
+
+    if (progressWithFilenameMatch) {
+      return {
+        type: "progress",
+        filename: progressWithFilenameMatch[1].trim(),
+        percentage: parseFloat(progressWithFilenameMatch[2]),
+        speed: progressWithFilenameMatch[3],
+        eta: progressWithFilenameMatch[4],
+      };
+    }
+
+    // Parse simple progress with filename
+    // Example: "[download] Video Title.f278.webm [||||||||||||||||||||||||||||||] 100.0% | 754.38KiB/s"
+    const simpleProgressMatch = output.match(
+      /\[download\]\s+(.+?)\s+\[[|\-\.]+\]\s+(\d+\.?\d*)%\s+(?:\|\s+([\d.]+\w+\/s))?/
+    );
+
+    if (simpleProgressMatch) {
+      return {
+        type: "progress",
+        filename: simpleProgressMatch[1].trim(),
+        percentage: parseFloat(simpleProgressMatch[2]),
+        speed: simpleProgressMatch[3],
+      };
+    }
+
     // Parse filename extraction
     const filenameMatch = output.match(/\[download\] Destination: (.+)/);
     if (filenameMatch) {
       return {
         type: "progress",
         filename: filenameMatch[1].trim(),
+      };
+    }
+
+    // Parse completion message
+    const completeMatch = output.match(/\[download\] 100% of (.+)/);
+    if (completeMatch) {
+      return {
+        type: "complete",
+        percentage: 100,
+      };
+    }
+
+    // Parse any line with percentage
+    const anyPercentageMatch = output.match(/(\d+\.?\d*)%/);
+    if (anyPercentageMatch && output.includes('[download]')) {
+      return {
+        type: "progress",
+        percentage: parseFloat(anyPercentageMatch[1]),
       };
     }
 
