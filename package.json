@@ -7,7 +7,9 @@
     "start": "npm run build && node dist/main.js",
     "dev": "tsc --watch",
     "clean": "rimraf dist",
-    "rebuild": "npm run clean && npm run build"
+    "rebuild": "npm run clean && npm run build",
+    "build:exe": "npm run build && pkg dist/main.js --targets node18-win-x64 --output video-downloader.exe",
+    "build:exe-all": "npm run build && pkg dist/main.js --targets node18-win-x64,node18-macos-x64,node18-linux-x64 --output video-downloader"
   },
   "keywords": [
     "video-downloader",
@@ -21,10 +23,12 @@
   "license": "MIT",
   "description": "A powerful TypeScript-based video downloader with interactive CLI interface",
   "devDependencies": {
-    "@types/node": "^24.5.1"
+    "@types/node": "^24.5.1",
+    "pkg": "^5.8.1"
   },
   "dependencies": {
-    "log-update": "^7.0.0"
+    "log-update": "^7.0.0",
+    "typescript": "^5.9.2"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -36,5 +40,11 @@
   "bugs": {
     "url": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader/issues"
   },
-  "homepage": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader#readme"
+  "homepage": "https://github.com/AbdallahKhaledAhmed/Video-Playlist-Downloader#readme",
+  "pkg": {
+    "assets": [
+      "utils/**/*"
+    ],
+    "outputPath": "build"
+  }
 }
