@@ -313,7 +313,7 @@ export default class Wrapper {
     );
 
     if (simpleProgressMatch) {
-      return {
+      return {z
         type: "progress",
         filename: simpleProgressMatch[1].trim(),
         percentage: parseFloat(simpleProgressMatch[2]),

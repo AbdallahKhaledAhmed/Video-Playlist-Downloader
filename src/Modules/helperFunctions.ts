@@ -6,6 +6,7 @@ import {
 } from "../types/helperTypes";
 import Wrapper from "./dlpWrapper";
 import * as readline from "readline";
+import { ProgressBar } from "../main";
 
 //====================== Playlist Downloading =======================
 function downloadPlaylist(
@@ -309,12 +310,9 @@ interface FormatSelectionResult {
  */
 export async function selectPlaylistFormat(
   dlp: Wrapper,
-  playlistVideos: PlaylistVideoLink[]
+  playlistVideos: PlaylistVideoLink[],
+  rl: readline.Interface
 ): Promise<{ video: PlaylistVideoLink; format: ProcessedFormat }[]> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
 
   const finalSelections: {
     video: PlaylistVideoLink;
@@ -415,8 +413,6 @@ export async function selectPlaylistFormat(
     }
   }
 
-  rl.close();
-
   console.log(
     `\n🎉 Format selection complete! ${finalSelections.length} videos ready for download.`
   );
@@ -427,7 +423,7 @@ export async function selectPlaylistFormat(
 function createProgressBar(percentage: number, width: number = 30): string {
   const filled = Math.round((percentage / 100) * width);
   const empty = width - filled;
-  return `[${"|".repeat(filled)}${".".repeat(empty)}] ${percentage.toFixed(
+  return `[${"█".repeat(filled)}${"░".repeat(empty)}] ${percentage.toFixed(
     1
   )}%`;
 }
@@ -439,9 +435,14 @@ export async function downloadPlaylistWithFormatSelection(
   dlp: Wrapper,
   playlistVideos: PlaylistVideoLink[],
   playlistName?: string,
-  channelName?: string
+  channelName?: string,
+  progressBar?: ProgressBar,
+  rl?: readline.Interface
 ): Promise<void> {
-  const selections = await selectPlaylistFormat(dlp, playlistVideos);
+  if (!rl) {
+    throw new Error("Readline interface is required for playlist format selection");
+  }
+  const selections = await selectPlaylistFormat(dlp, playlistVideos, rl);
 
   console.log("\n=== Starting downloads...\n");
 
@@ -455,6 +456,7 @@ export async function downloadPlaylistWithFormatSelection(
       // Download with progress tracking
       await new Promise<void>((resolve, reject) => {
         let downloadCompleted = false;
+        let lastPercentage = -1;
 
         dlp
           .downloadVideosByFormatId(
@@ -471,30 +473,52 @@ export async function downloadPlaylistWithFormatSelection(
                 progress.type === "progress" &&
                 progress.percentage !== undefined
               ) {
-                const progressBar = createProgressBar(progress.percentage);
-                const speed = progress.speed ? ` | ${progress.speed}` : "";
-                const eta = progress.eta ? ` | ETA: ${progress.eta}` : "";
-                const size = progress.size ? ` | ${progress.size}` : "";
+                const currentPercentage = Math.floor(progress.percentage);
+                
+                if (currentPercentage !== lastPercentage || progress.percentage >= 100) {
+                  lastPercentage = currentPercentage;
+                  
+                  const progressBarStr = createProgressBar(progress.percentage);
+                  const speed = progress.speed ? ` | ${progress.speed}` : "";
+                  const eta = progress.eta ? ` | ETA: ${progress.eta}` : "";
+                  const size = progress.size ? ` | ${progress.size}` : "";
 
-                // Use a simple console output for playlist progress to avoid conflicts
-                process.stdout.write(`\r${progressBar}${speed}${eta}${size}`);
+                  // Truncate filename if too long
+                  const displayName = video.title.length > 35 
+                    ? video.title.substring(0, 32) + "..." 
+                    : video.title;
+
+                  if (progressBar) {
+                    progressBar.update(
+                      `[DOWNLOAD] [${i + 1}/${selections.length}] ${displayName} ${progressBarStr}${speed}${eta}${size}`
+                    );
+                  } else {
+                    // Fallback to simple output
+                    process.stdout.write(`\r${progressBarStr}${speed}${eta}${size}`);
+                  }
+                }
               } else if (progress.type === "complete") {
                 downloadCompleted = true;
-                process.stdout.write("\n");
-                console.log(
-                  `[OK] [${i + 1}/${selections.length}] Completed: ${
-                    video.title
-                  }`
-                );
-                resolve();
+                if (progressBar) {
+                  progressBar.forceUpdate(`[DOWNLOAD] [${i + 1}/${selections.length}] ${video.title} [█████████████████████████] 100.0% | Complete!`);
+                  setTimeout(() => {
+                    progressBar.done();
+                    console.log(`[OK] [${i + 1}/${selections.length}] Completed: ${video.title}`);
+                    resolve();
+                  }, 500);
+                } else {
+                  process.stdout.write("\n");
+                  console.log(`[OK] [${i + 1}/${selections.length}] Completed: ${video.title}`);
+                  resolve();
+                }
               } else if (progress.type === "error") {
                 downloadCompleted = true;
-                process.stdout.write("\n");
-                console.log(
-                  `[ERROR] [${i + 1}/${selections.length}] Failed: ${
-                    video.title
-                  }`
-                );
+                if (progressBar) {
+                  progressBar.done();
+                } else {
+                  process.stdout.write("\n");
+                }
+                console.log(`[ERROR] [${i + 1}/${selections.length}] Failed: ${video.title}`);
                 reject(new Error(progress.message || "Download failed"));
               }
             }
@@ -502,20 +526,29 @@ export async function downloadPlaylistWithFormatSelection(
           .then(() => {
             if (!downloadCompleted) {
               downloadCompleted = true;
-              process.stdout.write("\n");
-              console.log(
-                `[OK] [${i + 1}/${selections.length}] Completed: ${video.title}`
-              );
-              resolve();
+              if (progressBar) {
+                progressBar.forceUpdate(`[DOWNLOAD] [${i + 1}/${selections.length}] ${video.title} [█████████████████████████] 100.0% | Complete!`);
+                setTimeout(() => {
+                  progressBar.done();
+                  console.log(`[OK] [${i + 1}/${selections.length}] Completed: ${video.title}`);
+                  resolve();
+                }, 500);
+              } else {
+                process.stdout.write("\n");
+                console.log(`[OK] [${i + 1}/${selections.length}] Completed: ${video.title}`);
+                resolve();
+              }
             }
           })
           .catch((error) => {
             if (!downloadCompleted) {
               downloadCompleted = true;
-              process.stdout.write("\n");
-              console.log(
-                `[ERROR] [${i + 1}/${selections.length}] Failed: ${video.title}`
-              );
+              if (progressBar) {
+                progressBar.done();
+              } else {
+                process.stdout.write("\n");
+              }
+              console.log(`[ERROR] [${i + 1}/${selections.length}] Failed: ${video.title}`);
               reject(error);
             }
           });
@@ -705,7 +738,8 @@ function getUserChoice(
   return new Promise((resolve) => {
     const askForChoice = () => {
       rl.question(`\nSelect format (1-${maxOptions}): `, (answer) => {
-        const choice = parseInt(answer.trim());
+        const trimmedAnswer = answer.trim();
+        const choice = parseInt(trimmedAnswer);
         if (isNaN(choice) || choice < 1 || choice > maxOptions) {
           console.log(
             `[ERROR] Please enter a number between 1 and ${maxOptions}`

@@ -16,7 +16,7 @@ declare global {
 }
 
 // Enhanced progress tracker with better reliability
-class ProgressBar {
+export class ProgressBar {
   private lastLineLength = 0;
   private isActive = false;
   private lastUpdate = 0;
@@ -159,6 +159,8 @@ const rl = readline.createInterface({
 
 function askQuestion(question: string): Promise<string> {
   return new Promise((resolve) => {
+    // Clear any active progress bar before asking for input
+    progress.clear();
     rl.question(question, (answer) => {
       resolve(answer.trim());
     });
@@ -424,8 +426,6 @@ function waitForDownloadCompletion(
     let lastPercentage = -1;
     let startTime = Date.now();
 
-    // Show initial progress
-    progress.forceUpdate(`[DOWNLOAD] ${currentFilename} [░░░░░░░░░░░░░░░░░░░░░░░░░] 0.0% | Starting...`);
 
     dlp
       .downloadVideosByFormatId(
@@ -655,7 +655,9 @@ async function processPlaylist(url: string): Promise<boolean> {
       dlp,
       playlistInfo.videos,
       playlistInfo.playlistName,
-      playlistInfo.channel
+      playlistInfo.channel,
+      progress,
+      rl
     );
 
     console.log("\n[SUCCESS] Playlist download completed!");
