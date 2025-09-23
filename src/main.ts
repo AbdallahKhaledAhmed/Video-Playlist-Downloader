@@ -45,6 +45,58 @@ class SimpleProgress {
   }
 }
 
+// Simple spinner class
+class Spinner {
+  private frames = ["|", "/", "-", "\\"];
+  private currentFrame = 0;
+  private interval: NodeJS.Timeout | null = null;
+  private message: string;
+  private lastLineLength = 0;
+
+  constructor(message: string = "Loading...") {
+    this.message = message;
+  }
+
+  start() {
+    this.interval = setInterval(() => {
+      const spinner = this.frames[this.currentFrame];
+      const output = `${spinner} ${this.message}`;
+
+      // Clear previous line
+      if (this.lastLineLength > 0) {
+        process.stdout.write("\r" + " ".repeat(this.lastLineLength) + "\r");
+      }
+
+      // Write new content
+      process.stdout.write(output);
+      this.lastLineLength = output.length;
+
+      this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+    }, 100);
+  }
+
+  stop(finalMessage?: string) {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+
+    // Clear the spinner line
+    if (this.lastLineLength > 0) {
+      process.stdout.write("\r" + " ".repeat(this.lastLineLength) + "\r");
+      this.lastLineLength = 0;
+    }
+
+    if (finalMessage) {
+      console.log(finalMessage);
+    }
+  }
+
+  updateMessage(newMessage: string) {
+    this.message = newMessage;
+  }
+}
+
 const progress = new SimpleProgress();
 
 // Handle executable vs development environment
@@ -156,6 +208,56 @@ function analyzeUrl(url: string): UrlAnalysis {
     cleanPlaylistUrl,
     singleVideoUrl,
   };
+}
+
+async function handleYtDlpUpdate(versionInfo: any): Promise<void> {
+  if (versionInfo.status === "outdated") {
+    console.log(`[UPDATE] Current version: ${versionInfo.current}`);
+    console.log(`[UPDATE] Latest version: ${versionInfo.latest}`);
+
+    const updateChoice = await askQuestion(
+      "\n[?] Would you like to update yt-dlp to the latest version? (y/n): "
+    );
+
+    if (
+      updateChoice.toLowerCase() === "y" ||
+      updateChoice.toLowerCase() === "yes"
+    ) {
+      const spinner = new Spinner("Updating yt-dlp...");
+
+      try {
+        spinner.start();
+        await dlp.updateToLatestVersion();
+        spinner.stop("[SUCCESS] yt-dlp updated successfully!");
+
+        // Verify the update
+        console.log("\n[INFO] Verifying update...");
+        const newVersionInfo = await dlp.checkVersion();
+        console.log(`[OK] yt-dlp is now version: ${newVersionInfo.current}`);
+      } catch (error) {
+        spinner.stop("[ERROR] Failed to update yt-dlp");
+        console.error(
+          `[ERROR] Update failed: ${
+            error instanceof Error ? error.message : error
+          }`
+        );
+
+        const continueChoice = await askQuestion(
+          "\n[?] Continue with current version anyway? (y/n): "
+        );
+
+        if (
+          continueChoice.toLowerCase() !== "y" &&
+          continueChoice.toLowerCase() !== "yes"
+        ) {
+          console.log("[EXIT] Exiting application.");
+          return;
+        }
+      }
+    } else {
+      console.log("[SKIP] Continuing with current version.");
+    }
+  }
 }
 
 async function getUrlAndProcess(): Promise<boolean> {
@@ -511,9 +613,9 @@ async function main() {
     try {
       const versionInfo = await dlp.checkVersion();
       console.log(`[OK] yt-dlp version: ${versionInfo.current}`);
-      if (versionInfo.status === "outdated") {
-        console.log(`[UPDATE] Update available: ${versionInfo.latest}`);
-      }
+
+      // Handle potential updates
+      await handleYtDlpUpdate(versionInfo);
     } catch (versionError) {
       console.error("[WARNING] Could not check yt-dlp version:", versionError);
       console.log(
