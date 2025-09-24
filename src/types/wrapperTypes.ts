@@ -143,9 +143,9 @@ export type MinimalPlaylistVideo = Pick<PlaylistVideoLink, "url" | "ind">;
 
 // Version check result
 export interface VersionCheckResult {
-  status: "up-to-date" | "outdated" | "unknown";
-  current: string;
-  latest: string | null;
+  status: "up-to-date" | "outdated" | "not-found" | "unknown";
+  current?: string | null;
+  latest?: string | null;
 }
 
 // Download progress information

@@ -342,7 +342,9 @@ export async function selectPlaylistFormat(
       const processedFormats = new Formats(formats).getGeneralFormats();
       videoFormats.push({ video, availableFormats: processedFormats });
     } catch (error) {
-      console.warn(`⚠️  Could not get formats for video: ${video.title}`);
+      console.warn(
+        `[WARNING]  Could not get formats for video: ${video.title}`
+      );
       console.warn(`Error: ${error}`);
     }
   }
@@ -350,7 +352,7 @@ export async function selectPlaylistFormat(
   console.log(`\n[OK] Successfully analyzed ${videoFormats.length} videos\n`);
 
   while (remainingVideos.length > 0) {
-    console.log(`\n📊 ${remainingVideos.length} videos remaining to process`);
+    console.log(`\n ${remainingVideos.length} videos remaining to process`);
 
     // Get all unique formats available across remaining videos
     const allAvailableFormats = getAllUniqueFormats(
@@ -410,7 +412,7 @@ export async function selectPlaylistFormat(
 
     if (remainingVideos.length > 0) {
       console.log(
-        `\n⏭️  ${remainingVideos.length} videos don't have this format. Please select another format for them.`
+        `\n⏭  ${remainingVideos.length} videos don't have this format. Please select another format for them.`
       );
     }
   }
@@ -418,7 +420,7 @@ export async function selectPlaylistFormat(
   rl.close();
 
   console.log(
-    `\n🎉 Format selection complete! ${finalSelections.length} videos ready for download.`
+    `\n Format selection complete! ${finalSelections.length} videos ready for download.`
   );
   return finalSelections;
 }
@@ -427,7 +429,7 @@ export async function selectPlaylistFormat(
 function createProgressBar(percentage: number, width: number = 30): string {
   const filled = Math.round((percentage / 100) * width);
   const empty = width - filled;
-  return `[${"|".repeat(filled)}${".".repeat(empty)}] ${percentage.toFixed(
+  return `[${"█".repeat(filled)}${"▒".repeat(empty)}] ${percentage.toFixed(
     1
   )}%`;
 }
@@ -443,7 +445,7 @@ export async function downloadPlaylistWithFormatSelection(
 ): Promise<void> {
   const selections = await selectPlaylistFormat(dlp, playlistVideos);
 
-  console.log("\n=== Starting downloads...\n");
+  console.log("\n>> Starting downloads...\n");
 
   for (let i = 0; i < selections.length; i++) {
     const { video, format } = selections[i];
@@ -526,7 +528,7 @@ export async function downloadPlaylistWithFormatSelection(
     }
   }
 
-  console.log("\n🎉 Playlist download complete!");
+  console.log("\n Playlist download complete!");
 }
 
 // Helper functions

@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { 
-  YtDlpFormats, 
-  PlaylistLinks, 
-  PlaylistVideoLink, 
-  VersionCheckResult, 
-  DownloadProgress 
+import {
+  YtDlpFormats,
+  PlaylistLinks,
+  PlaylistVideoLink,
+  VersionCheckResult,
+  DownloadProgress,
 } from "../types/wrapperTypes";
 
 export default class Wrapper {
@@ -26,8 +26,8 @@ export default class Wrapper {
     return new Promise((resolve, reject) => {
       this.YTDLP = spawn(this.path, ["--version"]);
 
-      this.YTDLP.on("error", (error) => {
-        reject(new Error(`YT-DLP not found: ${error.message}`));
+      this.YTDLP.on("error", () => {
+        resolve({ status: "not-found" });
       });
 
       this.YTDLP.stderr?.on("data", (data) => {

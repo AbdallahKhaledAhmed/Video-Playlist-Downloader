@@ -47,41 +47,21 @@ class SimpleProgress {
 
 const progress = new SimpleProgress();
 
-// Handle executable vs development environment
-function getExecutablePath(): string {
-  if (process.pkg) {
-    const execDir = path.dirname(process.execPath);
-    const ytdlpPath = path.join(execDir, "utils", "yt-dlp.exe");
-
-    if (fs.existsSync(ytdlpPath)) {
-      return ytdlpPath;
-    }
-
-    const fallbackPath = path.join(execDir, "yt-dlp.exe");
-    if (fs.existsSync(fallbackPath)) {
-      return fallbackPath;
-    }
-
-    return "yt-dlp";
-  }
-
-  return "utils/yt-dlp.exe";
-}
-
-const dlp = new Wrapper(getExecutablePath());
+const dlp = new Wrapper("./utils/yt-dlp.exe");
 
 // Create readline interface
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
 
-function askQuestion(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer.trim());
-    });
+async function askQuestion(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
   });
+  return new Promise((resolve) =>
+    rl.question(question, (ans: string) => {
+      rl.close();
+      resolve(ans.trim());
+    })
+  );
 }
 
 function ensureDirectoryExists(dirPath: string): boolean {
@@ -269,15 +249,14 @@ function displayOptions(
       index + 1
     }. ${resolution} | ${fileSize} | ${formatType} | Video:${vcodec}${fps}/Audio:${acodec}\n`;
   });
-
-  output += `\n>> Enter the number of your preferred format (1-${options.length}): `;
   console.log(output);
+  return options.length;
 }
 
 function createProgressBar(percentage: number, width: number = 30): string {
   const filled = Math.round((percentage / 100) * width);
   const empty = width - filled;
-  return `[${"|".repeat(filled)}${".".repeat(empty)}] ${percentage.toFixed(
+  return `[${"█".repeat(filled)}${"▒".repeat(empty)}] ${percentage.toFixed(
     1
   )}%`;
 }
@@ -408,9 +387,10 @@ async function processSingleVideo(url: string): Promise<boolean> {
       return true;
     }
 
-    displayOptions(processedFormats, url, preference);
-
-    const choice = await askQuestion("");
+    const optionsLen = displayOptions(processedFormats, url, preference);
+    const choice = await askQuestion(
+      `>> Enter the number of your preferred format (1-${optionsLen}): `
+    );
     const selectedIndex = parseInt(choice) - 1;
 
     if (
@@ -502,12 +482,20 @@ async function main() {
   try {
     console.clear();
     console.log("=== Video Downloader Started ===");
-    console.log("[INFO] Auto-detects single videos and playlists");
-    console.log("[INFO] Special handling for playlist URLs with video index");
 
     console.log("\n[LOADING] Checking yt-dlp version...");
     try {
-      const versionInfo = await dlp.checkVersion();
+      let versionInfo = await dlp.checkVersion();
+      if (versionInfo.status === "not-found") {
+        console.log("yt-dlp not found downloading the latest Version...");
+        try {
+          await dlp.downloadLatestRelease();
+          console.log("yt-dlp Downloaded successfully!");
+          versionInfo = await dlp.checkVersion();
+        } catch (err) {
+          console.log(err);
+        }
+      }
       console.log(`[OK] yt-dlp version: ${versionInfo.current}`);
       if (versionInfo.status === "outdated") {
         console.log(`[UPDATE] Update available: ${versionInfo.latest}`);
@@ -558,7 +546,6 @@ async function main() {
     await askQuestion("");
   } finally {
     console.log("\n[GOODBYE] Thanks for using Video Downloader!");
-    rl.close();
     dlp.cleanup();
   }
 }
@@ -566,7 +553,6 @@ async function main() {
 process.on("SIGINT", () => {
   progress.clear();
   console.log("\n[CANCELLED] Download cancelled by user. Goodbye!");
-  rl.close();
   dlp.cleanup();
   process.exit(0);
 });
