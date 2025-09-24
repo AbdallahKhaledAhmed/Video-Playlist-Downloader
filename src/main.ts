@@ -313,9 +313,7 @@ function waitForDownloadCompletion(
               const eta = progressInfo.eta ? ` | ETA: ${progressInfo.eta}` : "";
               const size = progressInfo.size ? ` | ${progressInfo.size}` : "";
 
-              progress.update(
-                `[DOWNLOAD] ${currentFilename} ${progressBar}${speed}${eta}${size}`
-              );
+              progress.update(`[DOWNLOAD] ${progressBar}${speed}${eta}${size}`);
             }
           } else if (progressInfo.type === "complete") {
             downloadCompleted = true;
