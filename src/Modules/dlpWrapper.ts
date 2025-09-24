@@ -179,6 +179,7 @@ export default class Wrapper {
       "-o",
       `${downloadDir}/${ind ? `[${ind}] ` : ""}%(title)s.%(ext)s`,
       "--newline", // Forces progress on new lines for easier parsing
+      "--embed-thumbnail",
     ];
 
     return new Promise((resolve, reject) => {
