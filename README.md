@@ -134,7 +134,7 @@ Then select from available quality options:
 Watch real-time download progress:
 
 ```
-[DOWNLOAD] Video Title [||||||||||||||||||||....] 67.3% | 2.1MB/s | ETA: 00:15 | 45.32MB
+[DOWNLOAD] Video Title [██████████████▒▒▒▒▒▒▒▒▒▒] 67.3% | 2.1MB/s | ETA: 00:15 | 45.32MB
 ```
 
 ### Playlist Processing
