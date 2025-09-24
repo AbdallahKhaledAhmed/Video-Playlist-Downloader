@@ -513,6 +513,8 @@ async function main() {
       console.log(`[OK] yt-dlp version: ${versionInfo.current}`);
       if (versionInfo.status === "outdated") {
         console.log(`[UPDATE] Update available: ${versionInfo.latest}`);
+        console.log("Downloading the latest yt-dlp Version...");
+        await dlp.updateToLatestVersion();
       }
     } catch (versionError) {
       console.error("[WARNING] Could not check yt-dlp version:", versionError);
